@@ -8,8 +8,8 @@ import java.util.concurrent.*;
 
 
 @State(Scope.Thread)
-@BenchmarkMode(Mode.Throughput)
-@OutputTimeUnit(TimeUnit.SECONDS)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @Fork(1)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
@@ -26,7 +26,8 @@ public class DatabaseSyncPerformanceComparison {
     public void setup() {
 
         if( testOption == 0){
-            builder = Thread.ofVirtual().scheduler(Executors.newFixedThreadPool(threadCount));
+            ThreadFactory factory = Thread.ofPlatform().factory();
+            builder = Thread.ofVirtual().scheduler(Executors.newFixedThreadPool(threadCount,factory));
         } else if( testOption == 1){
             builder = Thread.ofVirtual().scheduler(new ForkJoinPool(threadCount));
         }
@@ -50,13 +51,22 @@ public class DatabaseSyncPerformanceComparison {
         }
     }
 
-    @Param({"0", "1"})
+//    @Param({"0", "1"})
+//    public int testOption;
+//
+//    @Param({"1000", "5000", "10000"})
+//    public int requestCount;
+//
+//    @Param({"100", "500",  "1000"})
+//    public int threadCount;
+
+    @Param({"0"})
     public int testOption;
 
-    @Param({"1000", "5000", "10000"})
+    @Param({"10000"})
     public int requestCount;
 
-    @Param({"100", "500",  "5000"})
+    @Param({"1000"})
     public int threadCount;
 
 
@@ -89,21 +99,27 @@ public class DatabaseSyncPerformanceComparison {
         Thread thread = builder.start(() -> {
             CompletableFuture[] futures = new CompletableFuture[requestCount];
             String sql = "SELECT * FROM users ";
-            Runnable r = new Runnable() {
-                @Override
-                public void run() {
+//            Runnable r = new Runnable() {
+//                @Override
+//                public void run() {
+//                    try {
+//                        execQuery(sql);
+//                    } catch (Exception e) {
+//                        e.printStackTrace();
+//                    }
+//                }
+//            };
+            for (int i = 0; i < requestCount; i++) {
+                futures[i] = CompletableFuture.runAsync(()->{
                     try {
                         execQuery(sql);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
-                }
-            };
-            for (int i = 0; i < requestCount; i++) {
-                futures[i] = CompletableFuture.runAsync(r);
+                });
             }
             try {
-                CompletableFuture.allOf(futures).get();
+                CompletableFuture.allOf(futures).join();
             } catch (Exception e) {
                 e.printStackTrace();
             }
