@@ -22,24 +22,32 @@ public class DatabaseSyncPerformanceComparison {
 
     private static Thread.Builder.OfVirtual builder;
 
+    private static ExecutorService db_executor;
+
+
+    /**
+     * 初始化数据库连接池，根据参数选择协程的调度方式：FixedThreadPool、ForkJoinPool
+     */
     @Setup(Level.Trial)
     public void setup() {
 
         if( testOption == 0){
             ThreadFactory factory = Thread.ofPlatform().factory();
             builder = Thread.ofVirtual().scheduler(Executors.newFixedThreadPool(threadCount,factory));
+            db_executor = Executors.newFixedThreadPool(threadCount, Thread.ofPlatform().factory());
         } else if( testOption == 1){
             builder = Thread.ofVirtual().scheduler(new ForkJoinPool(threadCount));
+            db_executor = Executors.newWorkStealingPool(threadCount);
         }
 
 
         dataSource = new BasicDataSource();
         dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
         dataSource.setUsername("root");
-//        dataSource.setUrl("jdbc:mysql://localhost:3306/testdb");
-//        dataSource.setPassword("q19723011");
-        dataSource.setPassword("123456");
-        dataSource.setUrl("jdbc:mysql://localhost:3306/hsb");
+        dataSource.setUrl("jdbc:mysql://localhost:3306/testdb");
+        dataSource.setPassword("q19723011");
+//        dataSource.setPassword("123456");
+//        dataSource.setUrl("jdbc:mysql://localhost:3306/hsb");
     }
 
     @TearDown(Level.Trial)
@@ -71,6 +79,9 @@ public class DatabaseSyncPerformanceComparison {
 
 
 
+    /**
+     * 执行mysql同步操作
+     */
     public static String execQuery(String sql) throws SQLException {
         String queryResult = "";
         Statement statement = null;
@@ -94,21 +105,16 @@ public class DatabaseSyncPerformanceComparison {
         return queryResult;
     }
 
+
+
+    /**
+     * 将mysql的同步操作提交到独立线程池中,并异步等待线程池完成任务
+     */
     @Benchmark
     public void testDB() throws Exception {
         Thread thread = builder.start(() -> {
             CompletableFuture[] futures = new CompletableFuture[requestCount];
             String sql = "SELECT * FROM users ";
-//            Runnable r = new Runnable() {
-//                @Override
-//                public void run() {
-//                    try {
-//                        execQuery(sql);
-//                    } catch (Exception e) {
-//                        e.printStackTrace();
-//                    }
-//                }
-//            };
             for (int i = 0; i < requestCount; i++) {
                 futures[i] = CompletableFuture.runAsync(()->{
                     try {
@@ -118,6 +124,7 @@ public class DatabaseSyncPerformanceComparison {
                     }
                 });
             }
+
             try {
                 CompletableFuture.allOf(futures).join();
             } catch (Exception e) {
